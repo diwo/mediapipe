@@ -453,6 +453,6 @@ class GalleryFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener {
         private const val TAG = "GalleryFragment"
 
         // Value used to get frames at specific intervals for inference (e.g. every 300ms)
-        private const val VIDEO_INTERVAL_MS = 300L
+        private const val VIDEO_INTERVAL_MS = 50L
     }
 }

@@ -20,17 +20,27 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Environment
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
+import com.google.mediapipe.tasks.components.containers.Category
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileWriter
+import java.io.IOException
+import java.io.PrintWriter
+
 
 class HandLandmarkerHelper(
     var minHandDetectionConfidence: Float = DEFAULT_HAND_DETECTION_CONFIDENCE,
@@ -43,6 +53,68 @@ class HandLandmarkerHelper(
     // this listener is only used when running in RunningMode.LIVE_STREAM
     val handLandmarkerHelperListener: LandmarkerListener? = null
 ) {
+    private fun <T> listOfListsToJson(listOfLists: MutableList<MutableList<T>>, convert: (v: T) -> Any): JSONArray {
+        val outerArray = JSONArray()
+        for (list in listOfLists) {
+            val innerArray = JSONArray()
+            for (element in list) {
+                innerArray.put(convert(element))
+            }
+            outerArray.put(innerArray)
+        }
+        return outerArray
+    }
+
+    private fun xyzToJson(x: Float, y: Float, z: Float): JSONObject {
+        val obj = JSONObject()
+        obj.put("x", x)
+        obj.put("y", y)
+        obj.put("z", z)
+        return obj
+    }
+
+    private fun categoryToJson(category: Category): JSONObject {
+        val obj = JSONObject()
+        obj.put("score", category.score())
+        obj.put("index", category.index())
+        obj.put("categoryName", category.categoryName())
+        obj.put("displayName", category.displayName())
+        return obj
+    }
+
+    private fun writeFile(filename: String, results: List<HandLandmarkerResult>, intervalMs: Long) {
+        try {
+            val root = File(Environment.getExternalStorageDirectory(), "Documents")
+            if (!root.exists()) {
+                root.mkdirs()
+            }
+            val json = JSONObject()
+            json.put("interval_ms", intervalMs)
+            json.put("sample_size", results.size)
+            val samples = JSONArray()
+            for (landmarks in results) {
+                val sample = JSONObject()
+                sample.put("timestampMs", landmarks.timestampMs())
+                sample.put("landmarks", listOfListsToJson(landmarks.landmarks()) { lm -> xyzToJson(lm.x(), lm.y(), lm.z()) })
+                sample.put("worldLandmarks", listOfListsToJson(landmarks.worldLandmarks()) { lm -> xyzToJson(lm.x(), lm.y(), lm.z()) })
+                sample.put("handednesses", listOfListsToJson(landmarks.handednesses()) { category -> categoryToJson(category) })
+                samples.put(sample)
+            }
+            json.put("samples", samples)
+
+            val file = File(root, filename)
+            val writer = FileWriter(file)
+
+            PrintWriter(writer)
+                .use { it.write(json.toString()) }
+
+            writer.flush()
+            writer.close()
+//            Toast.makeText(context, "File Saved", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     // For this example this needs to be a var so it can be reset on changes.
     // If the Hand Landmarker will not change, a lazy val would be preferable.
@@ -283,6 +355,10 @@ class HandLandmarkerHelper(
         val inferenceTimePerFrameMs =
             (SystemClock.uptimeMillis() - startTime).div(numberOfFrameToRead)
 
+        if (!didErrorOccurred) {
+            writeFile("hand_landmarks.json", resultList, inferenceTimePerFrameMs)
+        }
+
         return if (didErrorOccurred) {
             null
         } else {
@@ -299,7 +375,6 @@ class HandLandmarkerHelper(
                         " while not using RunningMode.IMAGE"
             )
         }
-
 
         // Inference time is the difference between the system time at the
         // start and finish of the process
